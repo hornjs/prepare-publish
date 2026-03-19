@@ -77,18 +77,9 @@ async function main() {
 }
 
 function parseArgs(argv: string[]): CLIOptions {
-  const program = new Command();
+  const program = createProgram();
 
-  program
-    .name("prepare-publish")
-    .description("Prepare a publish-ready package directory")
-    .option("--cwd <dir>", "Package directory to prepare")
-    .option("--dry-run", "Print the generated package.json without writing files")
-    .option("--json", "Print machine-readable JSON output")
-    .option("--print-tree", "Print the publish file list with sizes")
-    .option("--disable-lint", "Skip publint checks")
-    .helpOption("-h, --help", "Show this message")
-    .parse(argv);
+  program.parse(argv);
 
   const options = program.opts<{
     cwd?: string;
@@ -105,6 +96,46 @@ function parseArgs(argv: string[]): CLIOptions {
     printTree: options.printTree ?? false,
     disableLint: options.disableLint ?? false,
   };
+}
+
+function createProgram() {
+  const program = new Command();
+  const heading = (text: string) => pc.bold(pc.cyan(text));
+  const commandText = (text: string) => pc.green(text);
+
+  return program
+    .name("prepare-publish")
+    .description("Prepare a publish-ready package directory")
+    .usage("[options]")
+    .summary("Prepare a publish-ready package directory")
+    .option("--cwd <dir>", "Package directory to prepare")
+    .option("--dry-run", "Print the generated package.json without writing files")
+    .option("--json", "Print machine-readable JSON output")
+    .option("--print-tree", "Print the publish file list with sizes")
+    .option("--disable-lint", "Skip publint checks")
+    .helpOption("-h, --help", "Show this message")
+    .addHelpText(
+      "beforeAll",
+      [
+        heading("prepare-publish"),
+        "Prepare a publish-ready package directory from source-oriented package metadata.",
+        "",
+      ].join("\n"),
+    )
+    .addHelpText(
+      "afterAll",
+      [
+        "",
+        heading("Examples"),
+        `  ${commandText("prepare-publish")}`,
+        `  ${commandText("prepare-publish --dry-run --print-tree")}`,
+        `  ${commandText("prepare-publish --json")}`,
+        `  ${commandText("prepare-publish --cwd packages/foo")}`,
+        "",
+        heading("Output"),
+        "  Writes a staged package into .prepare-publish and optionally runs publint.",
+      ].join("\n"),
+    );
 }
 
 main().catch((error) => {
