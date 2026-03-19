@@ -1,0 +1,62 @@
+{
+  "name": "@hornjs/prepare-publish",
+  "version": "0.0.0",
+  "description": "Prepare a publish-ready package directory from source-oriented package metadata.",
+  "homepage": "https://github.com/hornjs/prepare-publish#readme",
+  "license": "MIT",
+  "author": "Maofeng <hornjs@qq.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hornjs/prepare-publish.git"
+  },
+  "bin": {
+    "prepare-publish": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "directory": "dist"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "oxlint . && oxfmt --check .",
+    "fmt": "oxlint --fix . && oxfmt .",
+    "prepare:publish": "node ./dist/cli.mjs",
+    "prepare:publish:dry-run": "node ./dist/cli.mjs --dry-run",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "release": "bumpp",
+    "prepublishOnly": "pnpm run build && pnpm run prepare:publish"
+  },
+  "dependencies": {
+    "@npmcli/arborist": "^9.1.4",
+    "commander": "^14.0.3",
+    "npm-packlist": "^10.0.4",
+    "picocolors": "^1.1.1",
+    "publint": "^0.3.18"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@typescript/native-preview": "7.0.0-dev.20260316.1",
+    "bumpp": "^11.0.1",
+    "oxfmt": "^0.37.0",
+    "oxlint": "^1.52.0",
+    "tsdown": "^0.21.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  },
+  "resolutions": {}
+}
