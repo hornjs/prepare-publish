@@ -1,5 +1,5 @@
 {
-  "name": "@hornjs/prepare-publish",
+  "name": "prepare-publish",
   "version": "0.0.0",
   "description": "Prepare a publish-ready package directory from source-oriented package metadata.",
   "homepage": "https://github.com/hornjs/prepare-publish#readme",
