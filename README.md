@@ -16,7 +16,7 @@ It is designed for libraries that:
 ## Installation
 
 ```bash
-pnpm add -D @hornjs/prepare-publish
+pnpm add -D prepare-publish
 ```
 
 ## CLI
@@ -103,7 +103,7 @@ human-readable output.
 ## Library Usage
 
 ```ts
-import { preparePublish } from "@hornjs/prepare-publish";
+import { preparePublish } from "prepare-publish";
 
 const result = await preparePublish({
   cwd: process.cwd(),
