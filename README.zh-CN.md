@@ -1,4 +1,4 @@
-# @hornjs/prepare-publish
+# prepare-publish
 
 [English](./README.md)
 
