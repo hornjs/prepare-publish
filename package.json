@@ -1,6 +1,6 @@
 {
   "name": "prepare-publish",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Prepare a publish-ready package directory from source-oriented package metadata.",
   "homepage": "https://github.com/hornjs/prepare-publish#readme",
   "license": "MIT",
