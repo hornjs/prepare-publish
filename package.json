@@ -27,7 +27,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "directory": "dist"
+    "directories": { "src": "dist" }
   },
   "scripts": {
     "build": "tsdown",
