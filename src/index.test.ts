@@ -125,7 +125,9 @@ async function createFixture(options: FixtureOptions = {}) {
       "./package.json": "./package.json",
     },
     publishConfig: {
-      directory: "dist",
+      directories: {
+        src: "dist",
+      },
     },
     ...(options.packageJSON ?? {}),
   };

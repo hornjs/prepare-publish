@@ -55,6 +55,80 @@ If your development exports point to `./src/index.ts` and your built files live
 in `dist/`, the generated publish package metadata will point to
 `./dist/index.mjs` and `./dist/index.d.mts`.
 
+## Configuration
+
+Configure directory mappings in `package.json` under `publishConfig.directories`:
+
+```json
+{
+  "exports": {
+    ".": "./src/index.ts",
+    "./utils": "./src/utils/index.ts"
+  },
+  "publishConfig": {
+    "directories": {
+      "src": "dist"
+    }
+  }
+}
+```
+
+This maps source paths to built paths during publishing:
+- `./src/index.ts` → `./dist/index.mjs` / `./dist/index.d.mts`
+- `./src/utils/index.ts` → `./dist/utils/index.mjs`
+
+### Multiple Directory Mappings
+
+For complex projects with multiple source directories:
+
+```json
+{
+  "publishConfig": {
+    "directories": {
+      "src": "dist",
+      "src/core": "dist/core",
+      "src/types": "dist/types"
+    }
+  }
+}
+```
+
+Mappings are matched using **longest prefix first**:
+- `src/core/types/foo.ts` matches `src/core/types` → `dist/types/foo.ts`
+- `src/core/utils.ts` matches `src/core` → `dist/core/utils.ts`
+- `src/index.ts` matches `src` → `dist/index.ts`
+
+### Type-Only Exports
+
+For `.d.ts` files used as virtual module declarations:
+
+```json
+{
+  "exports": {
+    "./types": "./src/types.d.ts"
+  },
+  "publishConfig": {
+    "directories": {
+      "src": "dist"
+    }
+  }
+}
+```
+
+Results in:
+
+```json
+{
+  "exports": {
+    "./types": {
+      "types": "./dist/types.d.ts"
+    }
+  }
+}
+```
+
+The file must exist in both `packedFiles` and the mapped location.
+
 ## Publishing Flow
 
 Run the build and prepare steps from the project root, then publish from the

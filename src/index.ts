@@ -46,7 +46,13 @@ type PackageJSON = {
   exports?: Record<string, unknown>;
   publishConfig?: {
     access?: string;
-    directory?: string;
+    /**
+     * Directory mappings for source-to-dist path translation.
+     * Keys are source prefixes, values are target prefixes.
+     * Example: { "src": "dist" } maps "src/lib/xxx.d.ts" -> "dist/lib/xxx.d.ts"
+     * Multiple mappings are supported: { "src/core": "dist/core", "src/types": "dist/types" }
+     */
+    directories?: Record<string, string>;
     provenance?: boolean;
     registry?: string;
     tag?: string;
@@ -70,9 +76,7 @@ export async function preparePublish(
   const packageJSONPath = resolve(cwd, "package.json");
   const packageJSON = await readPackageJSON(packageJSONPath);
   const stageDirectory = resolve(cwd, ".prepare-publish");
-  const publishSubdirectory = packageJSON.publishConfig?.directory
-    ?.replaceAll("\\", "/")
-    .replace(/^\.?\//, "");
+  const directories = packageJSON.publishConfig?.directories;
   const arborist = new Arborist({ path: cwd });
 
   await cleanupGeneratedPublishArtifacts(stageDirectory);
@@ -81,7 +85,6 @@ export async function preparePublish(
   await assertPackedFilesExist(cwd, packedFiles);
   const publishPackageJSON = await createPublishPackageJSON(
     packageJSON,
-    publishSubdirectory,
     packedFiles,
   );
 
@@ -90,7 +93,7 @@ export async function preparePublish(
   }
 
   const publintMessages = options.publint
-    ? await runPublint(cwd, stageDirectory, publishPackageJSON, packedFiles, !!options.dryRun)
+    ? await runPublint(cwd, stageDirectory, publishPackageJSON, packedFiles, !!options.dryRun, directories)
     : [];
 
   return {
@@ -157,7 +160,6 @@ async function readPackageJSON(path: string): Promise<PackageJSON> {
 
 async function createPublishPackageJSON(
   packageJSON: PackageJSON,
-  publishSubdirectory: string | undefined,
   packedFiles: string[],
 ): Promise<PublishPackageJSON> {
   const {
@@ -167,17 +169,18 @@ async function createPublishPackageJSON(
     bin,
     ...rest
   } = packageJSON;
+  const directories = publishConfig?.directories;
   const publishExports = packageJSON.exports
-    ? await rewriteExports(packageJSON.exports, publishSubdirectory, packedFiles)
+    ? await rewriteExports(packageJSON.exports, packedFiles, directories)
     : undefined;
 
   return stripUndefined({
     ...rest,
     private: undefined,
-    bin: rewriteBin(bin, publishSubdirectory, packedFiles),
+    bin: rewriteBin(bin, packedFiles, directories),
     exports: publishExports,
     types: getTopLevelTypesPath(publishExports),
-    files: resolvePublishFiles(packageJSON),
+    files: resolvePublishFiles(packageJSON, packedFiles, directories),
     publishConfig: stripUndefined({
       access: publishConfig?.access,
       provenance: publishConfig?.provenance,
@@ -187,21 +190,47 @@ async function createPublishPackageJSON(
   }) as PublishPackageJSON;
 }
 
-function resolvePublishFiles(packageJSON: PackageJSON): string[] | undefined {
+function resolvePublishFiles(
+  packageJSON: PackageJSON,
+  packedFiles: string[],
+  directories: Record<string, string> | undefined,
+): string[] | undefined {
   if (!Array.isArray(packageJSON.files) || packageJSON.files.length === 0) {
     return packageJSON.files;
   }
 
-  return [...new Set(packageJSON.files)].sort();
+  // 重写 files 中的路径：如果文件被打包工具复制到发布目录，使用 packedFiles 中的实际路径
+  const rewrittenFiles = packageJSON.files.map((filePattern) => {
+    // 检查是否是具体的 .d.ts 文件路径（不是 glob 模式）
+    if (isDtsFile(filePattern) && !filePattern.includes("*")) {
+      const normalizedPath = normalizeRelativePath(filePattern);
+
+      // 1. 如果文件直接在 packedFiles 中，检查是否有映射后的路径
+      if (packedFiles.includes(normalizedPath)) {
+        // 优先使用 directories 映射
+        if (directories) {
+          const mappedPath = applyDirectoryMap(normalizedPath, directories);
+          if (mappedPath !== normalizedPath && packedFiles.includes(mappedPath)) {
+            return mappedPath;
+          }
+        }
+        return normalizedPath;
+      }
+    }
+
+    return filePattern;
+  });
+
+  return [...new Set(rewrittenFiles)].sort();
 }
 
 function rewriteBin(
   bin: unknown,
-  publishSubdirectory: string | undefined,
   packedFiles: string[],
+  directories: Record<string, string> | undefined,
 ): unknown {
   if (typeof bin === "string") {
-    return rewritePublishedPath(bin, publishSubdirectory, packedFiles);
+    return rewritePublishedPath(bin, packedFiles, directories);
   }
 
   if (bin && typeof bin === "object" && !Array.isArray(bin)) {
@@ -209,7 +238,7 @@ function rewriteBin(
       Object.entries(bin).map(([name, path]) => [
         name,
         typeof path === "string"
-          ? rewritePublishedPath(path, publishSubdirectory, packedFiles)
+          ? rewritePublishedPath(path, packedFiles, directories)
           : path,
       ]),
     );
@@ -220,14 +249,14 @@ function rewriteBin(
 
 async function rewriteExports(
   exportsField: Record<string, unknown>,
-  publishSubdirectory: string | undefined,
   packedFiles: string[],
+  directories: Record<string, string> | undefined,
 ): Promise<Record<string, unknown>> {
   return Object.fromEntries(
     await Promise.all(
       Object.entries(exportsField).map(async ([subpath, value]) => [
         subpath,
-        await rewriteExportValue(value, publishSubdirectory, packedFiles, subpath === "."),
+        await rewriteExportValue(value, packedFiles, subpath === ".", directories),
       ]),
     ),
   );
@@ -235,9 +264,9 @@ async function rewriteExports(
 
 async function rewriteExportValue(
   value: unknown,
-  publishSubdirectory: string | undefined,
   packedFiles: string[],
   allowTypeWrapper = false,
+  directories: Record<string, string> | undefined,
   keyHint?: string,
 ): Promise<unknown> {
   if (typeof value === "string") {
@@ -245,7 +274,11 @@ async function rewriteExportValue(
       return value;
     }
 
-    const exportEntry = await resolveBuiltExport(value, publishSubdirectory, packedFiles, keyHint);
+    const exportEntry = await resolveBuiltExport(value, packedFiles, directories, keyHint);
+    // 如果是 .d.ts 文件返回的 { types: ... } 对象，直接返回
+    if (isDtsOnlyExport(exportEntry)) {
+      return exportEntry;
+    }
     if (allowTypeWrapper && typeof exportEntry === "object" && exportEntry !== null) {
       return exportEntry;
     }
@@ -274,7 +307,7 @@ async function rewriteExportValue(
   if (Array.isArray(value)) {
     return Promise.all(
       value.map((entry) =>
-        rewriteExportValue(entry, publishSubdirectory, packedFiles, false, keyHint),
+        rewriteExportValue(entry, packedFiles, false, directories, keyHint),
       ),
     );
   }
@@ -285,7 +318,7 @@ async function rewriteExportValue(
         await Promise.all(
           Object.entries(value).map(async ([key, entry]) => [
             key,
-            await rewriteExportValue(entry, publishSubdirectory, packedFiles, false, key),
+            await rewriteExportValue(entry, packedFiles, false, directories, key),
           ]),
         ),
       ),
@@ -297,12 +330,40 @@ async function rewriteExportValue(
 
 async function resolveBuiltExport(
   sourcePath: string,
-  publishSubdirectory: string | undefined,
   packedFiles: string[],
+  directories: Record<string, string> | undefined,
   keyHint?: string,
 ): Promise<string | Record<string, string>> {
+  // 处理 .d.ts 文件：直接指向类型定义文件的导出
+  // 只根据 packedFiles 中实际存在的文件来处理，不主动构建路径
+  if (isDtsFile(sourcePath)) {
+    const normalizedPath = normalizeRelativePath(sourcePath);
+
+    // 1. 首先检查源文件路径是否直接在 packedFiles 中
+    if (packedFiles.includes(normalizedPath)) {
+      // 检查是否有 directories 映射，优先使用映射后的路径
+      if (directories) {
+        const mappedPath = applyDirectoryMap(normalizedPath, directories);
+        if (mappedPath !== normalizedPath && packedFiles.includes(mappedPath)) {
+          return { types: `./${mappedPath}` };
+        }
+      }
+      return { types: `./${normalizedPath}` };
+    }
+
+    // 2. 如果源文件不在 packedFiles 中，尝试查找映射后的路径
+    if (directories) {
+      const mappedPath = applyDirectoryMap(normalizedPath, directories);
+      if (mappedPath !== normalizedPath && packedFiles.includes(mappedPath)) {
+        return { types: `./${mappedPath}` };
+      }
+    }
+
+    throw new Error(`Could not find a type file for export '${sourcePath}'.`);
+  }
+
   const sourceExt = extname(sourcePath);
-  const pathCandidates = getPublishedPathCandidates(sourcePath, publishSubdirectory);
+  const pathCandidates = getPublishedPathCandidates(sourcePath, directories);
   const baseCandidates = pathCandidates.map((path) =>
     sourceExt ? path.slice(0, -sourceExt.length) : path,
   );
@@ -362,6 +423,7 @@ async function writePublishFiles(
   stageDirectory: string,
   packageJSON: PublishPackageJSON,
   packedFiles: string[],
+  directories?: Record<string, string> | undefined,
 ) {
   await mkdir(stageDirectory, { recursive: true });
   await writeFile(
@@ -373,7 +435,12 @@ async function writePublishFiles(
     if (relativePath === "package.json") {
       continue;
     }
-    const targetPath = join(stageDirectory, relativePath);
+    // 如果指定了 directories，应用映射来调整目标路径
+    // 这用于 dry-run 模式的临时目录创建，模拟发布后的结构
+    const targetRelativePath = directories
+      ? applyDirectoryMap(relativePath, directories)
+      : relativePath;
+    const targetPath = join(stageDirectory, targetRelativePath);
     await copyIfExists(resolve(cwd, relativePath), targetPath);
   }
 }
@@ -384,9 +451,10 @@ async function runPublint(
   packageJSON: PublishPackageJSON,
   packedFiles: string[],
   dryRun: boolean,
+  directories: Record<string, string> | undefined,
 ): Promise<string[]> {
   const pkgDir = dryRun
-    ? await createTemporaryPublishDirectory(cwd, packageJSON, packedFiles)
+    ? await createTemporaryPublishDirectory(cwd, packageJSON, packedFiles, directories)
     : stageDirectory;
 
   try {
@@ -410,9 +478,11 @@ async function createTemporaryPublishDirectory(
   cwd: string,
   packageJSON: PublishPackageJSON,
   packedFiles: string[],
+  directories: Record<string, string> | undefined,
 ) {
   const tempDir = await mkdtemp(join(tmpdir(), "prepare-publish-"));
-  await writePublishFiles(cwd, tempDir, packageJSON, packedFiles);
+  // 临时目录需要模拟发布后的结构（应用 directories 映射）
+  await writePublishFiles(cwd, tempDir, packageJSON, packedFiles, directories);
   return tempDir;
 }
 
@@ -471,18 +541,65 @@ function isJavaScriptLikeExtension(extension: string): boolean {
   return [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".jsx"].includes(extension);
 }
 
+function isDtsFile(path: string): boolean {
+  return path.endsWith(".d.ts") || path.endsWith(".d.mts") || path.endsWith(".d.cts");
+}
+
+/**
+ * Apply directory mapping to translate source paths to target paths.
+ * Returns the mapped path if a matching prefix is found, otherwise returns the original path.
+ */
+function applyDirectoryMap(
+  sourcePath: string,
+  directoryMap: Record<string, string> | undefined,
+): string {
+  if (!directoryMap) return sourcePath;
+
+  const normalizedPath = normalizeRelativePath(sourcePath);
+
+  // Sort keys by length (longest first) to ensure most specific match
+  const sortedKeys = Object.keys(directoryMap).sort((a, b) => b.length - a.length);
+
+  for (const sourcePrefix of sortedKeys) {
+    const targetPrefix = directoryMap[sourcePrefix];
+    const normalizedSourcePrefix = normalizeRelativePath(sourcePrefix);
+
+    if (
+      normalizedPath === normalizedSourcePrefix ||
+      normalizedPath.startsWith(`${normalizedSourcePrefix}/`)
+    ) {
+      const relativePart = normalizedPath.slice(normalizedSourcePrefix.length);
+      const normalizedTargetPrefix = normalizeRelativePath(targetPrefix);
+      return `${normalizedTargetPrefix}${relativePart}`;
+    }
+  }
+
+  return sourcePath;
+}
+
 function isExportRecord(value: unknown): value is Record<string, string> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isDtsOnlyExport(value: unknown): value is { types: string } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    "types" in value &&
+    typeof (value as Record<string, string>).types === "string"
+  );
+}
+
 function rewritePublishedPath(
   sourcePath: string,
-  publishSubdirectory: string | undefined,
   packedFiles: string[],
+  directories: Record<string, string> | undefined,
 ): string {
   const normalizedPath = normalizeRelativePath(sourcePath);
   const sourceExt = extname(normalizedPath);
-  const pathCandidates = getPublishedPathCandidates(sourcePath, publishSubdirectory);
+  const pathCandidates = getPublishedPathCandidates(sourcePath, directories);
   const isJavaScriptLikePath = isJavaScriptLikeExtension(sourceExt);
 
   if (isJavaScriptLikePath) {
@@ -521,28 +638,21 @@ async function assertPackedFilesExist(cwd: string, packedFiles: string[]) {
   );
 }
 
-function withPublishSubdirectory(
-  paths: string[],
-  publishSubdirectory: string | undefined,
-): string[] {
-  return paths.map((path) =>
-    publishSubdirectory ? join(publishSubdirectory, path).split("\\").join("/") : path,
-  );
-}
+
 
 function getPublishedPathCandidates(
   sourcePath: string,
-  publishSubdirectory: string | undefined,
+  directories: Record<string, string> | undefined,
 ): string[] {
   const normalizedPath = normalizeRelativePath(sourcePath);
-  const sourceRootRelativePath = stripFirstPathSegment(normalizedPath);
-  const candidates = [
-    normalizedPath,
-    ...withPublishSubdirectory([normalizedPath], publishSubdirectory),
-  ];
+  const candidates = [normalizedPath];
 
-  if (sourceRootRelativePath !== normalizedPath) {
-    candidates.push(...withPublishSubdirectory([sourceRootRelativePath], publishSubdirectory));
+  // 如果存在 directories 映射，添加映射后的路径作为候选
+  if (directories) {
+    const mappedPath = applyDirectoryMap(normalizedPath, directories);
+    if (mappedPath !== normalizedPath) {
+      candidates.push(mappedPath);
+    }
   }
 
   return [...new Set(candidates)];

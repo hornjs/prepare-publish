@@ -59,6 +59,80 @@ staging 目录：
 也就是说，`.prepare-publish/` 才是最终发布根目录；工具会根据实际打包文件和
 构建产物重写发布态路径。
 
+## 配置
+
+在 `package.json` 的 `publishConfig.directories` 中配置目录映射：
+
+```json
+{
+  "exports": {
+    ".": "./src/index.ts",
+    "./utils": "./src/utils/index.ts"
+  },
+  "publishConfig": {
+    "directories": {
+      "src": "dist"
+    }
+  }
+}
+```
+
+这会在发布时将源码路径映射到构建产物路径：
+- `./src/index.ts` → `./dist/index.mjs` / `./dist/index.d.mts`
+- `./src/utils/index.ts` → `./dist/utils/index.mjs`
+
+### 多目录映射
+
+对于包含多个源码目录的复杂项目：
+
+```json
+{
+  "publishConfig": {
+    "directories": {
+      "src": "dist",
+      "src/core": "dist/core",
+      "src/types": "dist/types"
+    }
+  }
+}
+```
+
+映射使用**最长前缀优先**算法：
+- `src/core/types/foo.ts` 匹配 `src/core/types` → `dist/types/foo.ts`
+- `src/core/utils.ts` 匹配 `src/core` → `dist/core/utils.ts`
+- `src/index.ts` 匹配 `src` → `dist/index.ts`
+
+### 类型专用导出
+
+对于用作虚拟模块声明的 `.d.ts` 文件：
+
+```json
+{
+  "exports": {
+    "./types": "./src/types.d.ts"
+  },
+  "publishConfig": {
+    "directories": {
+      "src": "dist"
+    }
+  }
+}
+```
+
+结果会是：
+
+```json
+{
+  "exports": {
+    "./types": {
+      "types": "./dist/types.d.ts"
+    }
+  }
+}
+```
+
+文件必须同时存在于 `packedFiles` 和映射后的位置中。
+
 ## 发布流程
 
 先在项目根目录完成构建和准备，再进入 `.prepare-publish/` 发布：
