@@ -440,6 +440,14 @@ async function writePublishFiles(
     const targetRelativePath = directories
       ? applyDirectoryMap(relativePath, directories)
       : relativePath;
+
+    // 如果映射后的目标文件已经在 packedFiles 中，跳过源文件的复制
+    // 例如：src/bin.ts 映射到 dist/bin.mjs，如果 dist/bin.mjs 已在 packedFiles 中，
+    // 则不需要复制 src/bin.ts
+    if (targetRelativePath !== relativePath && packedFiles.includes(targetRelativePath)) {
+      continue;
+    }
+
     const targetPath = join(stageDirectory, targetRelativePath);
     await copyIfExists(resolve(cwd, relativePath), targetPath);
   }
@@ -660,9 +668,4 @@ function getPublishedPathCandidates(
 
 function normalizeRelativePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "");
-}
-
-function stripFirstPathSegment(path: string): string {
-  const slashIndex = path.indexOf("/");
-  return slashIndex === -1 ? path : path.slice(slashIndex + 1);
 }
