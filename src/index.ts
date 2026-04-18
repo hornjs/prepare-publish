@@ -173,13 +173,19 @@ async function createPublishPackageJSON(
   const publishExports = packageJSON.exports
     ? await rewriteExports(packageJSON.exports, packedFiles, directories)
     : undefined;
+  const publishTypes = await rewriteTopLevelTypes(
+    typeof packageJSON.types === "string" ? packageJSON.types : undefined,
+    publishExports,
+    packedFiles,
+    directories,
+  );
 
   return stripUndefined({
     ...rest,
     private: undefined,
     bin: rewriteBin(bin, packedFiles, directories),
     exports: publishExports,
-    types: getTopLevelTypesPath(publishExports),
+    types: publishTypes,
     files: resolvePublishFiles(packageJSON, packedFiles, directories),
     publishConfig: stripUndefined({
       access: publishConfig?.access,
@@ -521,14 +527,42 @@ function pickExistingFile(files: string[], candidates: string[]): string | undef
   return candidates.find((candidate) => files.includes(candidate));
 }
 
-function getTopLevelTypesPath(
+async function rewriteTopLevelTypes(
+  typesField: string | undefined,
   exportsField: Record<string, unknown> | undefined,
-): string | undefined {
-  const rootExport = exportsField?.["."];
-  if (!isExportRecord(rootExport)) {
+  packedFiles: string[],
+  directories: Record<string, string> | undefined,
+): Promise<string | undefined> {
+  if (!typesField) {
     return undefined;
   }
-  return typeof rootExport.types === "string" ? rootExport.types : undefined;
+
+  const rewrittenTypes = await resolveBuiltExport(
+    typesField,
+    packedFiles,
+    directories,
+    "types",
+  );
+  const resolvedTypes =
+    typeof rewrittenTypes === "string"
+      ? rewrittenTypes
+      : isExportRecord(rewrittenTypes) && typeof rewrittenTypes.types === "string"
+        ? rewrittenTypes.types
+        : undefined;
+  if (!resolvedTypes) {
+    return undefined;
+  }
+
+  const rootExport = exportsField?.["."];
+  if (
+    isExportRecord(rootExport) &&
+    typeof rootExport.types === "string" &&
+    rootExport.types === resolvedTypes
+  ) {
+    return undefined;
+  }
+
+  return resolvedTypes;
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {

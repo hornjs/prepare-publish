@@ -50,6 +50,42 @@ describe("preparePublish", () => {
     await expect(readFile(join(cwd, ".prepare-publish/package.json"), "utf8")).rejects.toThrow();
   });
 
+  it("drops top-level types when it matches exports root types", async () => {
+    const cwd = await createFixture({
+      packageJSON: {
+        types: "./src/index.ts",
+      },
+    });
+
+    const result = await preparePublish({ cwd, dryRun: true, publint: false });
+
+    expect(result.packageJSON.exports?.["."]).toEqual({
+      types: "./dist/index.d.mts",
+      default: "./dist/index.mjs",
+    });
+    expect(result.packageJSON.types).toBeUndefined();
+  });
+
+  it("keeps top-level types when it points to a different declaration file", async () => {
+    const cwd = await createFixture({
+      packageJSON: {
+        types: "./src/public-types.d.ts",
+      },
+      files: {
+        "src/public-types.d.ts": "export interface PublicType {}\n",
+        "dist/public-types.d.ts": "export interface PublicType {}\n",
+      },
+    });
+
+    const result = await preparePublish({ cwd, dryRun: true, publint: false });
+
+    expect(result.packageJSON.exports?.["."]).toEqual({
+      types: "./dist/index.d.mts",
+      default: "./dist/index.mjs",
+    });
+    expect(result.packageJSON.types).toBe("./dist/public-types.d.ts");
+  });
+
   it("preserves nested export paths when resolving built files", async () => {
     const cwd = await createFixture({
       packageJSON: {

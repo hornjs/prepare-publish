@@ -12,6 +12,9 @@
   `.npmignore` 和 `files`
 - 希望在准备发布目录时顺带运行 `publint`
 
+如果存在顶层 `types` 字段，`prepare-publish` 会先把它重写到构建后的声明文件路径。
+如果它最终和 `exports["."].types` 指向同一个文件，就会移除顶层 `types`，避免重复元数据。
+
 ## 安装
 
 ```bash
@@ -132,6 +135,14 @@ staging 目录：
 ```
 
 文件必须同时存在于 `packedFiles` 和映射后的位置中。
+
+### 根导出 `types` 去重
+
+如果你同时定义了顶层 `types` 和 `exports["."].types`，
+`prepare-publish` 会比较它们重写后的发布路径：
+
+- 如果两者指向同一个声明文件，则移除顶层 `types`
+- 如果两者指向不同的声明文件，则保留顶层 `types`
 
 ## 发布流程
 

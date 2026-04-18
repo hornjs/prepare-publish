@@ -13,6 +13,11 @@ It is designed for libraries that:
   rules, including `.npmignore` and `files`
 - optionally want to run `publint` against the prepared output
 
+When a top-level `types` field is present, `prepare-publish` rewrites it to the
+built declaration path. If it resolves to the same file as
+`exports["."].types`, the top-level `types` field is removed to avoid duplicate
+metadata.
+
 ## Installation
 
 ```bash
@@ -128,6 +133,14 @@ Results in:
 ```
 
 The file must exist in both `packedFiles` and the mapped location.
+
+### Root Types De-duplication
+
+If you define both a top-level `types` field and `exports["."].types`,
+`prepare-publish` compares their rewritten publish paths:
+
+- if they point to the same declaration file, the top-level `types` field is removed
+- if they point to different declaration files, the top-level `types` field is kept
 
 ## Publishing Flow
 
